@@ -1,0 +1,1 @@
+docker build -t nninteractive_slicer_server .
