@@ -5,6 +5,9 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 import gzip
 from typing import List, Dict
+import requests
+
+ML_SERVICE_URL = "http://localhost:8001/predict"  # URL of the ML segmentation service
 
 app = FastAPI()
 
@@ -17,6 +20,37 @@ class BBoxParams(BaseModel):
     outer_point_one: list[int]  # [x, y, z] - already reversed by plugin
     outer_point_two: list[int]  # [x, y, z] - already reversed by plugin
     positive_click: bool = True
+
+
+def get_ml_segmentation(image_array, bbox_coords):
+    """
+    Call ML service and get segmentation
+    Replaces create_mock_segmentation()
+    """
+    # Parse bbox
+    p1, p2 = bbox_coords[0], bbox_coords[1]
+    bbox_min = [min(p1[i], p2[i]) for i in range(3)]
+    bbox_max = [max(p1[i], p2[i]) for i in range(3)]
+    
+    # Call ML service
+    response = requests.post(
+        ML_SERVICE_URL,
+        json={
+            "ct_volume": image_array.flatten().tolist(),
+            "ct_shape": list(image_array.shape),
+            "bbox_min": bbox_min,
+            "bbox_max": bbox_max
+        },
+        timeout=30
+    )
+    
+    # Decompress result
+    compressed = response.content
+    decompressed = gzip.decompress(compressed)
+    packed_bits = np.frombuffer(decompressed, dtype=np.uint8)
+    seg = np.unpackbits(packed_bits)[:np.prod(image_array.shape)].reshape(image_array.shape)
+    
+    return seg
 
 def create_mock_segmentation(image_shape, bbox_coords, segment_id):
     """
@@ -137,6 +171,13 @@ async def add_bbox_interaction(params: BBoxParams):
         [params.outer_point_one, params.outer_point_two],
         next_segment_id
     )
+
+    ml_seg = get_ml_segmentation(
+        current_image,
+        [params.outer_point_one, params.outer_point_two]
+    )
+
+
     
     # Store this segmentation in our history
     segmentation_history.append({
