@@ -5,6 +5,10 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 import gzip
 from typing import List, Dict
+import subprocess
+import os
+import tempfile
+import nibabel as nib
 
 app = FastAPI()
 
@@ -43,6 +47,84 @@ def create_mock_segmentation(image_shape, bbox_coords, segment_id):
     seg[dist <= radius] = 1
     
     return seg
+
+def run_nnunet_segmentation(image: np.ndarray, bbox_coords: List[List[int]], dataset_id: str, config: str, fold: str) -> np.ndarray | None:
+    """
+    Runs nnU-Net prediction on a given image and bounding box.
+
+    Args:
+        image: The input image as a NumPy array.
+        bbox_coords: A list containing two points [p1, p2] that define the bounding box.
+        dataset_id: The nnU-Net Dataset ID (e.g., "Dataset123_TaskName").
+        config: The nnU-Net configuration (e.g., "3d_fullres").
+        fold: The trained model fold to use for inference (e.g., "0").
+
+    Returns:
+        A NumPy array containing the segmentation mask, or None if an error occurs.
+    """
+    p1, p2 = np.array(bbox_coords[0]), np.array(bbox_coords[1])
+
+    # Determine the bounding box slices, assuming (z, y, x) order
+    z_min, y_min, x_min = np.min([p1, p2], axis=0)
+    z_max, y_max, x_max = np.max([p1, p2], axis=0)
+
+    # Create the bounding box channel
+    bbox_channel = np.zeros(image.shape, dtype=np.uint8)
+    bbox_channel[z_min:z_max+1, y_min:y_max+1, x_min:x_max+1] = 1
+
+    # Create temporary directories for nnU-Net input and output
+    with tempfile.TemporaryDirectory() as temp_dir:
+        input_dir = os.path.join(temp_dir, "input")
+        output_dir = os.path.join(temp_dir, "output")
+        os.makedirs(input_dir)
+        os.makedirs(output_dir)
+
+        try:
+            # 1. Save the current image and the bbox channel as NIfTI files
+            image_path_0000 = os.path.join(input_dir, "image_0000.nii.gz")
+            image_path_0001 = os.path.join(input_dir, "image_0001.nii.gz")
+            
+            affine = np.eye(4)  # Using identity affine
+
+            nifti_img_0000 = nib.Nifti1Image(image, affine)
+            nib.save(nifti_img_0000, image_path_0000)
+
+            nifti_img_0001 = nib.Nifti1Image(bbox_channel, affine)
+            nib.save(nifti_img_0001, image_path_0001)
+
+            # 2. Construct and execute the nnU-Net command
+            command = [
+                "nnUNetv2_predict",
+                "-i", input_dir,
+                "-o", output_dir,
+                "-d", dataset_id,
+                "-c", config,
+                "-f", fold,
+                "--disable_tta"
+            ]
+            
+            print(f"Running command: {' '.join(command)}")
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            
+            print("nnU-Net stdout:", result.stdout)
+            print("nnU-Net stderr:", result.stderr)
+
+            # 3. Read and return the output segmentation
+            output_path = os.path.join(output_dir, "image.nii.gz")
+            if not os.path.exists(output_path):
+                raise FileNotFoundError("nnU-Net did not produce an output file.")
+
+            seg_img = nib.load(output_path)
+            seg_array = seg_img.get_fdata().astype(np.uint8)
+            return seg_array
+
+        except subprocess.CalledProcessError as e:
+            print(f"nnU-Net command failed with exit code {e.returncode}")
+            print("Stderr:", e.stderr)
+            return None
+        except Exception as e:
+            print(f"An unexpected error occurred during nnU-Net prediction: {e}")
+            return None
 
 def combine_all_segmentations(image_shape):
     """
@@ -131,12 +213,17 @@ async def add_bbox_interaction(params: BBoxParams):
     print(f"Received bbox (reversed): {params.outer_point_one} to {params.outer_point_two}")
     print(f"Positive click: {params.positive_click}")
     
-    # Create new segmentation for this bounding box
-    new_seg = create_mock_segmentation(
-        current_image.shape, 
-        [params.outer_point_one, params.outer_point_two],
-        next_segment_id
-    )
+    # Create new segmentation for this bounding box using nnU-Net
+    DATASET_ID = "Dataset999_middleClick"
+    CONFIG = "3d_fullres"
+    FOLD = "0"
+
+    bbox = [params.outer_point_one, params.outer_point_two]
+    
+    new_seg = run_nnunet_segmentation(current_image, bbox, DATASET_ID, CONFIG, FOLD)
+
+    if new_seg is None:
+        return {"status": "error", "message": "nnU-Net prediction failed."}
     
     # Store this segmentation in our history
     segmentation_history.append({
@@ -144,7 +231,7 @@ async def add_bbox_interaction(params: BBoxParams):
         'mask': new_seg,
         'positive': params.positive_click,
         'bbox': [params.outer_point_one, params.outer_point_two],
-        'voxel_count': np.sum(new_seg)
+        'voxel_count': int(np.sum(new_seg))
     })
     
     print(f"Added segment {next_segment_id} ({'positive' if params.positive_click else 'negative'}) with {np.sum(new_seg)} voxels")
