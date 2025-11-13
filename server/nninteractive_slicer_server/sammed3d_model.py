@@ -150,6 +150,16 @@ class FastSAM3DPredictor:
 
             print(f"SAM-Med3D: Final mask - shape: {mask.shape}, nonzero voxels: {np.count_nonzero(mask)}")
 
+            print(f"DEBUG: You clicked at: {point_coords[0]}")
+            print(f"DEBUG: After scaling: {scaled_coords[0]}")
+            nz = np.nonzero(mask)
+            if len(nz[0]) > 0:
+                print(f"DEBUG: Nonzero voxel ranges:")
+                print(f"  Z range: {nz[0].min()} to {nz[0].max()} (out of {mask.shape[0]})")
+                print(f"  Y range: {nz[1].min()} to {nz[1].max()} (out of {mask.shape[1]})")
+                print(f"  X range: {nz[2].min()} to {nz[2].max()} (out of {mask.shape[2]})")
+                print(f"  Center of mass: z={nz[0].mean():.1f}, y={nz[1].mean():.1f}, x={nz[2].mean():.1f}")
+
             return mask
 
         except Exception as e:
