@@ -218,7 +218,7 @@ class SlicerNNInteractiveWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
 
         self.ui.pbInteractionLassoCancel.clicked.connect(self.on_lasso_cancel_clicked)
 
-        self.addObserver(slicer.app.applicationLogic().GetInteractionNode(), 
+        self.addObserver(slicer.app.applicationLogic().GetInteractionNode(),
             slicer.vtkMRMLInteractionNode.InteractionModeChangedEvent, self.on_interaction_node_modified)
 
     def setup_shortcuts(self):
@@ -392,7 +392,7 @@ class SlicerNNInteractiveWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
                 )
 
             prompt_type["node"] = node
-            prompt_type["button"].clicked.connect(lambda checked, prompt_name=prompt_name: self.on_place_button_clicked(checked, prompt_name)) 
+            prompt_type["button"].clicked.connect(lambda checked, prompt_name=prompt_name: self.on_place_button_clicked(checked, prompt_name))
             self.all_prompt_buttons[prompt_name] = prompt_type["button"]
 
             light_dark_mode = self.is_ui_dark_or_light_mode()
@@ -469,7 +469,7 @@ class SlicerNNInteractiveWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
         dn.SetSegmentOpacity2DOutline("fg", opacity)
 
         self._prev_scribble_mask = None
-            
+
         light_dark_mode = self.is_ui_dark_or_light_mode()
         icon = qt.QIcon(self.resourcePath(f"Icons/prompts/{light_dark_mode}/scribble_icon.svg"))
         self.ui.pbInteractionScribble.setIcon(icon)
@@ -646,7 +646,8 @@ class SlicerNNInteractiveWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
         """
         Uploads point prompt to the server.
         """
-        url = f"{self.server}/add_point_interaction"
+       # url = f"{self.server}/add_point_interaction"
+        url = f"{self.server}/add_fastsam3d_interaction"
 
         seg_response = self.request_to_server(
             url, json={"voxel_coord": xyz[::-1], "positive_click": positive_click}
@@ -712,7 +713,8 @@ class SlicerNNInteractiveWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
         """
         Uploads BBox prompt to the server.
         """
-        url = f"{self.server}/add_bbox_interaction"
+        #url = f"{self.server}/add_bbox_interaction"
+        url = f"{self.server}/add_fastsam3d_bbox_interaction"
 
         seg_response = self.request_to_server(
             url,
@@ -837,8 +839,9 @@ class SlicerNNInteractiveWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
         """
         if np.sum(mask) == 0:
             return
-        
-        url = f"{self.server}/add_{tp}_interaction"
+
+        #url = f"{self.server}/add_{tp}_interaction"
+        url = f"{self.server}/add_fastsam3d_{tp}_interaction"
         try:
             buffer = io.BytesIO()
             np.save(buffer, mask)
@@ -923,7 +926,7 @@ class SlicerNNInteractiveWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
         # After creating a new segment, negative prompts do not make sense, so
         # we're automatically switching the prompt type to positive.
         self.ui.pbPromptTypePositive.click()
-        
+
         debug_print("doing make_new_segment")
         segmentation_node = self.get_segmentation_node()
 
@@ -961,7 +964,7 @@ class SlicerNNInteractiveWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
         # After clearing a segment, negative prompts do not make sense, so
         # we're automatically switching the prompt type to positive.
         self.ui.pbPromptTypePositive.click()
-        
+
         _, selected_segment_id = self.get_selected_segmentation_node_and_segment_id()
 
         if selected_segment_id:
@@ -1010,7 +1013,7 @@ class SlicerNNInteractiveWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
             # If we do this when segmentation_mask.sum() == 0, sometimes Slicer will throw "bogus" OOM errors
             # (see https://github.com/coendevente/SlicerNNInteractive/issues/38)
             segmentationNode.GetSegmentation().CollapseBinaryLabelmaps()
-        
+
         del segmentation_mask
 
         debug_print(f"show_segmentation took {time.time() - t0}")
@@ -1369,7 +1372,7 @@ class SlicerNNInteractiveWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
             return xyz
         elif point_type == "curve_point":
             vtk_pts = caller.GetCurvePointsWorld()
-            
+
             if vtk_pts is not None:
                 vtk_pts_data = vtk_to_numpy(vtk_pts.GetData())
                 xyz = [self.ras_to_xyz(pos) for pos in vtk_pts_data]
