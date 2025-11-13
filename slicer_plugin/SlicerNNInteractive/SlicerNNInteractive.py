@@ -985,12 +985,16 @@ class SlicerNNInteractiveWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
         """
         Updates the currently selected segment with the given binary mask array.
         """
+        print(f"DEBUG show_segmentation: input shape {segmentation_mask.shape}, sum {segmentation_mask.sum()}")
         t0 = time.time()
         self.previous_states["segment_data"] = segmentation_mask
 
         segmentationNode, selectedSegmentID = (
             self.get_selected_segmentation_node_and_segment_id()
         )
+
+        print(f"DEBUG: segmentationNode = {segmentationNode}")
+        print(f"DEBUG: selectedSegmentID = {selectedSegmentID}")
 
         was_3d_shown = segmentationNode.GetSegmentation().ContainsRepresentation(slicer.vtkSegmentationConverter.GetSegmentationClosedSurfaceRepresentationName())
 
@@ -1002,6 +1006,7 @@ class SlicerNNInteractiveWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
                 selectedSegmentID,
                 self.get_volume_node(),
             )
+            print(f"DEBUG: After updateSegmentBinaryLabelmapFromArray")
             if was_3d_shown:
                 segmentationNode.CreateClosedSurfaceRepresentation()
 
