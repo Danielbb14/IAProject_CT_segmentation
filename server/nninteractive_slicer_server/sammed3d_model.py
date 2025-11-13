@@ -102,19 +102,21 @@ class FastSAM3DPredictor:
             # Prepare image tensor [C, D, H, W]
             image_tensor = torch.from_numpy(resized_image).float()
             if image_tensor.ndim == 3:
-                image_tensor = image_tensor.unsqueeze(0)  # [1, 128, 128, 128]
+                image_tensor = image_tensor.unsqueeze(0)
             image_tensor = image_tensor.to(self.device)
 
-            # Scale coordinates
-            # Scale coordinates - coords are [x, y, z] but shape is [z, y, x]
-            scaled_coords = point_coords[:, [2, 1, 0]].copy()  # [x,y,z] -> [z,y,x]
+            print(f"DEBUG: Input coords [x,y,z]: {point_coords[0]}")
+
+            # Convert [x, y, z] to [z, y, x] to match image dims (D, H, W)
+            coords_zyx = point_coords[:, [2, 1, 0]].copy()
+            print(f"DEBUG: Swapped to [z,y,x]: {coords_zyx[0]}")
+
+            # Scale using zoom_factors which are in [z, y, x] order
+            scaled_coords = coords_zyx.copy()
             for i in range(3):
                 scaled_coords[:, i] *= zoom_factors[i]
 
-            print(f"DEBUG PREDICT: Input point_coords: {point_coords}")
-            print(f"DEBUG PREDICT: Original shape: {self.original_shape}")
-            print(f"DEBUG PREDICT: Zoom factors: {zoom_factors}")
-            print(f"DEBUG PREDICT: Scaled coords: {scaled_coords}")
+            print(f"DEBUG: Scaled [z,y,x]: {scaled_coords[0]}")
 
             # Prepare prompts
             point_coords_torch = torch.from_numpy(scaled_coords).float().unsqueeze(0)
@@ -124,7 +126,7 @@ class FastSAM3DPredictor:
 
             # Build input
             batched_input = [{
-                "image": image_tensor,  # [1, 128, 128, 128]
+                "image": image_tensor,
                 "original_size": (target_size, target_size, target_size),
                 "point_coords": point_coords_torch,
                 "point_labels": point_labels_torch,
@@ -134,31 +136,20 @@ class FastSAM3DPredictor:
             with torch.no_grad():
                 outputs = self.model(batched_input, multimask_output=False)
 
-            print(f"SAM-Med3D: Model output keys: {outputs[0].keys()}")
-
             # Extract and resize mask
             masks = outputs[0]['masks']
-            print(f"SAM-Med3D: Masks shape: {masks.shape}, dtype: {masks.dtype}")
-            print(f"SAM-Med3D: Masks range: [{masks.min().item():.3f}, {masks.max().item():.3f}]")
-
             mask_128 = masks[0, 0].cpu().numpy()
 
-            # Resize back to original shape
+            # Resize back
             zoom_back = [s / target_size for s in self.original_shape]
             mask = zoom(mask_128.astype(float), zoom_back, order=0)
             mask = (mask > 0.5).astype(np.uint8)
 
-            print(f"SAM-Med3D: Final mask - shape: {mask.shape}, nonzero voxels: {np.count_nonzero(mask)}")
+            print(f"SAM-Med3D: Nonzero voxels: {np.count_nonzero(mask)}")
 
-            print(f"DEBUG: You clicked at: {point_coords[0]}")
-            print(f"DEBUG: After scaling: {scaled_coords[0]}")
             nz = np.nonzero(mask)
             if len(nz[0]) > 0:
-                print(f"DEBUG: Nonzero voxel ranges:")
-                print(f"  Z range: {nz[0].min()} to {nz[0].max()} (out of {mask.shape[0]})")
-                print(f"  Y range: {nz[1].min()} to {nz[1].max()} (out of {mask.shape[1]})")
-                print(f"  X range: {nz[2].min()} to {nz[2].max()} (out of {mask.shape[2]})")
-                print(f"  Center of mass: z={nz[0].mean():.1f}, y={nz[1].mean():.1f}, x={nz[2].mean():.1f}")
+                print(f"DEBUG: Mask center [z,y,x]: {nz[0].mean():.1f}, {nz[1].mean():.1f}, {nz[2].mean():.1f}")
 
             return mask
 
