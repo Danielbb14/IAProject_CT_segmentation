@@ -106,9 +106,15 @@ class FastSAM3DPredictor:
             image_tensor = image_tensor.to(self.device)
 
             # Scale coordinates
-            scaled_coords = point_coords.copy()
+            # Scale coordinates - coords are [x, y, z] but shape is [z, y, x]
+            scaled_coords = point_coords[:, [2, 1, 0]].copy()  # [x,y,z] -> [z,y,x]
             for i in range(3):
                 scaled_coords[:, i] *= zoom_factors[i]
+
+            print(f"DEBUG PREDICT: Input point_coords: {point_coords}")
+            print(f"DEBUG PREDICT: Original shape: {self.original_shape}")
+            print(f"DEBUG PREDICT: Zoom factors: {zoom_factors}")
+            print(f"DEBUG PREDICT: Scaled coords: {scaled_coords}")
 
             # Prepare prompts
             point_coords_torch = torch.from_numpy(scaled_coords).float().unsqueeze(0)

@@ -650,7 +650,7 @@ class SlicerNNInteractiveWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
         url = f"{self.server}/add_fastsam3d_interaction"
 
         seg_response = self.request_to_server(
-            url, json={"voxel_coord": xyz[::-1], "positive_click": positive_click}
+            url, json={"voxel_coord": xyz, "positive_click": positive_click}
         )
 
         unpacked_segmentation = self.unpack_binary_segmentation(

@@ -438,9 +438,13 @@ async def add_fastsam3d_interaction(params: PointParams):
     if error is not None:
         return error
 
+    print(f"DEBUG SERVER: Received voxel_coord: {params.voxel_coord}")
+    print(f"DEBUG SERVER: Image shape: {FASTSAM3D_PREDICTOR.original_shape}")
     # Convert to numpy array
     point_coords = np.array([params.voxel_coord], dtype=np.float32)
     point_labels = np.array([1 if params.positive_click else 0], dtype=np.int32)
+
+    print(f"DEBUG SERVER: point_coords array: {point_coords}")
 
     # Get mask from FastSAM3D
     mask = FASTSAM3D_PREDICTOR.predict(point_coords, point_labels)
