@@ -656,6 +656,10 @@ class SlicerNNInteractiveWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
         unpacked_segmentation = self.unpack_binary_segmentation(
             seg_response.content, decompress=False
         )
+        print(f"DEBUG: unpacked_segmentation shape: {unpacked_segmentation.shape}")
+        print(f"DEBUG: unpacked_segmentation sum: {unpacked_segmentation.sum()}")
+        print(f"DEBUG: unpacked_segmentation dtype: {unpacked_segmentation.dtype}")
+
         debug_print("unpacked_segmentation.sum():", unpacked_segmentation.sum())
         debug_print(seg_response)
         debug_print(f"{positive_click} point prompt triggered! {xyz}")

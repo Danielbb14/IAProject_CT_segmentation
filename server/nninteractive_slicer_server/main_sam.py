@@ -446,12 +446,11 @@ async def add_fastsam3d_interaction(params: PointParams):
     mask = FASTSAM3D_PREDICTOR.predict(point_coords, point_labels)
 
     # Convert to binary format (same as nnInteractive)
-    compressed_bin = segmentation_binary(mask, compress=True)
+    compressed_bin = segmentation_binary(mask, compress=False)
 
     return Response(
         content=compressed_bin,
         media_type="application/octet-stream",
-        headers={"Content-Encoding": "gzip"},
     )
 
 
