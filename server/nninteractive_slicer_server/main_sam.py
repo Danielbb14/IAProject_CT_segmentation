@@ -308,6 +308,8 @@ async def add_point_interaction(params: PointParams):
     """
     Receives a point (voxel_coord) + positive/negative. Updates the model & returns a binary mask.
     """
+    print(f"DEBUG nnInteractive: Received coords: {params.voxel_coord}")
+    print(f"DEBUG nnInteractive: Image shape: {img.shape if img is not None else 'None'}")
     error = get_error_if_img_not_set()
     if error is not None:
         return error

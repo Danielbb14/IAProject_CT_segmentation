@@ -646,8 +646,8 @@ class SlicerNNInteractiveWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
         """
         Uploads point prompt to the server.
         """
-       # url = f"{self.server}/add_point_interaction"
-        url = f"{self.server}/add_fastsam3d_interaction"
+        url = f"{self.server}/add_point_interaction"
+        #url = f"{self.server}/add_fastsam3d_interaction"
 
         seg_response = self.request_to_server(
             url, json={"voxel_coord": xyz, "positive_click": positive_click}
