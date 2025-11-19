@@ -7,6 +7,7 @@ SAM-Med3D is the full model that FastSAM3D was distilled from.
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from typing import List, Tuple, Optional
 from scipy.ndimage import zoom
 
@@ -89,67 +90,136 @@ class FastSAM3DPredictor:
         point_coords: np.ndarray,
         point_labels: np.ndarray
     ) -> np.ndarray:
-        """Run prediction with point prompts"""
+        """Run prediction using cropping approach from FastSAM3D Slicer plugin"""
         if self.model is None or self.current_image is None:
             return self._mock_segmentation(point_coords)
 
         try:
-            # Resize to 128^3
             target_size = 128
-            zoom_factors = [target_size / s for s in self.original_shape]
-            resized_image = zoom(self.current_image, zoom_factors, order=1)
 
-            # Prepare image tensor [C, D, H, W]
-            image_tensor = torch.from_numpy(resized_image).float()
-            if image_tensor.ndim == 3:
-                image_tensor = image_tensor.unsqueeze(0)
-            image_tensor = image_tensor.to(self.device)
+            # Step 1: Pad image to at least 128x128x128
+            pad_width = [(max(0, target_size - self.current_image.shape[i]) // 2,
+                        max(0, target_size - self.current_image.shape[i]) // 2)
+                        for i in range(3)]
 
-            print(f"DEBUG: Input coords [x,y,z]: {point_coords[0]}")
-
-            # Convert [x, y, z] to [z, y, x] to match image dims (D, H, W)
-            coords_zyx = point_coords[:, [2, 1, 0]].copy()
-            print(f"DEBUG: Swapped to [z,y,x]: {coords_zyx[0]}")
-
-            # Scale using zoom_factors which are in [z, y, x] order
-            scaled_coords = coords_zyx.copy()
             for i in range(3):
-                scaled_coords[:, i] *= zoom_factors[i]
+                if pad_width[i][0] + pad_width[i][1] + self.current_image.shape[i] < target_size:
+                    pad_width[i] = (pad_width[i][0] + 1, pad_width[i][1])
 
-            print(f"DEBUG: Scaled [z,y,x]: {scaled_coords[0]}")
+            padded_image = np.pad(self.current_image, pad_width, 'constant')
 
-            # Prepare prompts
-            point_coords_torch = torch.from_numpy(scaled_coords).float().unsqueeze(0)
-            point_labels_torch = torch.from_numpy(point_labels).int().unsqueeze(0)
-            point_coords_torch = point_coords_torch.to(self.device)
-            point_labels_torch = point_labels_torch.to(self.device)
+            # Step 2: Convert coordinates from [x,y,z] to [D,H,W] and adjust for padding
+            include_points = [[coords[2], coords[1], coords[0]] for coords in point_coords]  # [z,y,x] = [D,H,W]
 
-            # Build input
-            batched_input = [{
-                "image": image_tensor,
-                "original_size": (target_size, target_size, target_size),
-                "point_coords": point_coords_torch,
-                "point_labels": point_labels_torch,
-            }]
+            offsets = [pad_width[i][0] for i in range(3)]
+            adjusted_points = [[coord + offset for coord, offset in zip(point, offsets)]
+                            for point in include_points]
 
-            # Run model
-            with torch.no_grad():
-                outputs = self.model(batched_input, multimask_output=False)
+            print(f"\nCropping approach:")
+            print(f"Clicked [x,y,z]: {point_coords[0]}")
+            print(f"Converted to [D,H,W]: {include_points[0]}")
+            print(f"After padding: {adjusted_points[0]}")
 
-            # Extract and resize mask
-            masks = outputs[0]['masks']
-            mask_128 = masks[0, 0].cpu().numpy()
+            # Step 3: Find 128x128x128 box containing all points
+            min_coords = []
+            max_coords = []
 
-            # Resize back
-            zoom_back = [s / target_size for s in self.original_shape]
-            mask = zoom(mask_128.astype(float), zoom_back, order=0)
-            mask = (mask > 0.5).astype(np.uint8)
+            for i in range(3):
+                coords_in_dim = [point[i] for point in adjusted_points]
+                max_coord = max(coords_in_dim)
+                min_coord = min(coords_in_dim)
 
-            print(f"SAM-Med3D: Nonzero voxels: {np.count_nonzero(mask)}")
+                if max_coord - min_coord > target_size:
+                    print(f"Points span {max_coord - min_coord} > {target_size} in dim {i}")
+                    return np.zeros(self.original_shape, dtype=np.uint8)
 
+                bound = padded_image.shape[i]
+                crop = int((target_size - (max_coord - min_coord)) / 2)
+
+                min_point = int(min_coord - min(min_coord, crop) - crop + min((bound - max_coord), crop))
+                max_point = int(max_coord + min((bound - max_coord), crop) + crop - min(min_coord, crop))
+
+                # Ensure exactly target_size
+                if max_point - min_point != target_size:
+                    if min_point > 0:
+                        min_point -= 1
+                    else:
+                        max_point += 1
+
+                min_coords.append(min_point)
+                max_coords.append(max_point)
+
+            # Step 4: Crop the region
+            cropped_image = padded_image[min_coords[0]:max_coords[0],
+                                        min_coords[1]:max_coords[1],
+                                        min_coords[2]:max_coords[2]]
+
+            # Step 5: Adjust coordinates to be relative to crop
+            final_points = [[coord - offset for coord, offset in zip(point, min_coords)]
+                        for point in adjusted_points]
+
+            print(f"Crop box: D[{min_coords[0]}:{max_coords[0]}], H[{min_coords[1]}:{max_coords[1]}], W[{min_coords[2]}:{max_coords[2]}]")
+            print(f"Coords in crop [D,H,W]: {final_points[0]}")
+
+            # Step 6: Prepare tensors
+            image_tensor = torch.from_numpy(cropped_image).float()
+            image_tensor = image_tensor.unsqueeze(0).unsqueeze(0).to(self.device)
+
+            points_tensor = torch.from_numpy(np.array(final_points)).float().unsqueeze(0).to(self.device)
+            labels_tensor = torch.from_numpy(point_labels).long().unsqueeze(0).to(self.device)
+
+            # Step 7: Run model (matching FastSAM3D plugin)
+            prev_masks = torch.zeros_like(image_tensor).to(self.device)
+            low_res_masks = F.interpolate(prev_masks.float(),
+                                        size=(target_size//4, target_size//4, target_size//4))
+
+            image_embeddings = self.model.image_encoder(image_tensor)
+
+            sparse_embeddings, dense_embeddings = self.model.prompt_encoder(
+                points=[points_tensor, labels_tensor],
+                boxes=None,
+                masks=low_res_masks
+            )
+
+            low_res_masks, _ = self.model.mask_decoder(
+                image_embeddings=image_embeddings,
+                image_pe=self.model.prompt_encoder.get_dense_pe(),
+                sparse_prompt_embeddings=sparse_embeddings,
+                dense_prompt_embeddings=dense_embeddings,
+                multimask_output=False,
+            )
+
+            # Step 8: Upsample to cropped size
+            final_masks = F.interpolate(
+                low_res_masks,
+                size=cropped_image.shape,
+                mode='trilinear',
+                align_corners=False
+            )
+
+            mask_crop = torch.sigmoid(final_masks).detach().cpu().numpy().squeeze()
+            mask_crop = (mask_crop > 0.5).astype(np.uint8)
+
+            # Step 9: Place back in padded space
+            mask_padded = np.zeros(padded_image.shape, dtype=np.uint8)
+            mask_padded[min_coords[0]:max_coords[0],
+                    min_coords[1]:max_coords[1],
+                    min_coords[2]:max_coords[2]] = mask_crop
+
+            # Step 10: Remove padding to get back to original size
+            mask = mask_padded[pad_width[0][0]:mask_padded.shape[0] - pad_width[0][1],
+                            pad_width[1][0]:mask_padded.shape[1] - pad_width[1][1],
+                            pad_width[2][0]:mask_padded.shape[2] - pad_width[2][1]]
+
+            # Verify
             nz = np.nonzero(mask)
             if len(nz[0]) > 0:
-                print(f"DEBUG: Mask center [z,y,x]: {nz[0].mean():.1f}, {nz[1].mean():.1f}, {nz[2].mean():.1f}")
+                center = [nz[0].mean(), nz[1].mean(), nz[2].mean()]
+                clicked = [point_coords[0, 2], point_coords[0, 1], point_coords[0, 0]]
+                dist = np.sqrt(sum((c - cl)**2 for c, cl in zip(center, clicked)))
+                print(f"Mask center [D,H,W]: [{center[0]:.1f}, {center[1]:.1f}, {center[2]:.1f}]")
+                print(f"Clicked [D,H,W]: [{clicked[0]:.1f}, {clicked[1]:.1f}, {clicked[2]:.1f}]")
+                print(f"Distance: {dist:.1f}\n")
 
             return mask
 
