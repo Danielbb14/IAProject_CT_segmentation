@@ -31,6 +31,10 @@ class FastSAM3DPredictor:
         self.model_loaded = False
         self.current_image = None
         self.original_shape = None
+        # Resampling parameters
+        self.original_spacing = (5.0, 0.703125, 0.703125)  # LITS default spacing
+        self.target_spacing = 1.5  # SAM-Med3D training spacing (isotropic)
+        self.zoom_factors = None
 
     def load_model(self, checkpoint_path: str = "../checkpoints_data/sam_med3d_turbo.pth"):
         """Load SAM-Med3D model (12-layer full model)"""
@@ -80,10 +84,18 @@ class FastSAM3DPredictor:
             self.model_loaded = True
 
     def set_image(self, image: np.ndarray):
-        """Store image for prediction"""
-        self.current_image = image
+        """Store image and resample to isotropic spacing"""
         self.original_shape = image.shape
-        print(f"SAM-Med3D: Image set with shape {image.shape}")
+
+        # Resample to isotropic 1.5mm spacing
+        print(f"SAM-Med3D: Original shape: {image.shape}, spacing: {self.original_spacing}")
+
+        self.zoom_factors = [orig / self.target_spacing for orig in self.original_spacing]
+        resampled = zoom(image, self.zoom_factors, order=1)  # bilinear interpolation
+
+        self.current_image = resampled
+        print(f"SAM-Med3D: Resampled to isotropic {self.target_spacing}mm: {resampled.shape}")
+        print(f"SAM-Med3D: Zoom factors: {self.zoom_factors}")
 
     def predict(
         self,
@@ -95,6 +107,15 @@ class FastSAM3DPredictor:
             return self._mock_segmentation(point_coords)
 
         try:
+            # Step 0: Adjust coordinates for resampled space
+            adjusted_coords = point_coords.copy()
+            adjusted_coords[:, 0] *= self.zoom_factors[2]  # x -> W
+            adjusted_coords[:, 1] *= self.zoom_factors[1]  # y -> H
+            adjusted_coords[:, 2] *= self.zoom_factors[0]  # z -> D
+
+            print(f"\nOriginal coords [x,y,z]: {point_coords[0]}")
+            print(f"Resampled coords [x,y,z]: {adjusted_coords[0]}")
+
             target_size = 128
 
             # Step 1: Pad image to at least 128x128x128
@@ -109,14 +130,12 @@ class FastSAM3DPredictor:
             padded_image = np.pad(self.current_image, pad_width, 'constant')
 
             # Step 2: Convert coordinates from [x,y,z] to [D,H,W] and adjust for padding
-            include_points = [[coords[2], coords[1], coords[0]] for coords in point_coords]  # [z,y,x] = [D,H,W]
+            include_points = [[coords[2], coords[1], coords[0]] for coords in adjusted_coords]
 
             offsets = [pad_width[i][0] for i in range(3)]
             adjusted_points = [[coord + offset for coord, offset in zip(point, offsets)]
                             for point in include_points]
 
-            print(f"\nCropping approach:")
-            print(f"Clicked [x,y,z]: {point_coords[0]}")
             print(f"Converted to [D,H,W]: {include_points[0]}")
             print(f"After padding: {adjusted_points[0]}")
 
@@ -206,13 +225,25 @@ class FastSAM3DPredictor:
                     min_coords[1]:max_coords[1],
                     min_coords[2]:max_coords[2]] = mask_crop
 
-            # Step 10: Remove padding to get back to original size
-            mask = mask_padded[pad_width[0][0]:mask_padded.shape[0] - pad_width[0][1],
+            # Step 10: Remove padding to get back to resampled size
+            mask_resampled = mask_padded[pad_width[0][0]:mask_padded.shape[0] - pad_width[0][1],
                             pad_width[1][0]:mask_padded.shape[1] - pad_width[1][1],
                             pad_width[2][0]:mask_padded.shape[2] - pad_width[2][1]]
 
-            # Verify
-            nz = np.nonzero(mask)
+            # Step 11: Resample mask back to original spacing
+            inverse_zoom = [1.0 / zf for zf in self.zoom_factors]
+            mask_original = zoom(mask_resampled.astype(float), inverse_zoom, order=0)  # nearest neighbor for binary
+
+            # Ensure exact original shape
+            mask_original = mask_original[:self.original_shape[0],
+                                         :self.original_shape[1],
+                                         :self.original_shape[2]]
+            mask_original = mask_original.astype(np.uint8)
+
+            print(f"Resampled mask back to original shape: {mask_original.shape}")
+
+            # Verify in original space
+            nz = np.nonzero(mask_original)
             if len(nz[0]) > 0:
                 center = [nz[0].mean(), nz[1].mean(), nz[2].mean()]
                 clicked = [point_coords[0, 2], point_coords[0, 1], point_coords[0, 0]]
@@ -221,7 +252,7 @@ class FastSAM3DPredictor:
                 print(f"Clicked [D,H,W]: [{clicked[0]:.1f}, {clicked[1]:.1f}, {clicked[2]:.1f}]")
                 print(f"Distance: {dist:.1f}\n")
 
-            return mask
+            return mask_original
 
         except Exception as e:
             print(f"SAM-Med3D prediction failed: {e}")
@@ -234,7 +265,8 @@ class FastSAM3DPredictor:
         if self.current_image is None:
             return np.zeros((100, 100, 100), dtype=np.uint8)
 
-        mask = np.zeros(self.current_image.shape, dtype=np.uint8)
+        # Use original shape for mock
+        mask = np.zeros(self.original_shape, dtype=np.uint8)
 
         if len(point_coords) > 0:
             center = point_coords[0].astype(int)
