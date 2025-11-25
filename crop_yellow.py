@@ -35,16 +35,15 @@ def crop_to_cube(volume, indices, cube_size, pad_value=0):
 
     return cube
 
-def crop_yellow_regions(ct_path, seg_path, cube_mm, output_dir=None):
+def crop_yellow_regions_with_seg(ct_path, seg_path, cube_mm, output_dir=None):
     ct_nii = nib.load(ct_path)
     seg_nii = nib.load(seg_path)
 
     ct = ct_nii.get_fdata()
     seg = seg_nii.get_fdata()
 
-    # Only keep yellow regions (label=2)
+    # Only keep yellow regions (label=2) for cropping centers
     mask = (seg == 2).astype(np.uint8)
-
     labeled_mask, num_components = label(mask)
 
     voxel_spacing = ct_nii.header.get_zooms()[:3]
@@ -58,10 +57,17 @@ def crop_yellow_regions(ct_path, seg_path, cube_mm, output_dir=None):
         if indices.size == 0:
             continue
 
-        cube = crop_to_cube(ct, indices, cube_size)
-        out_file = output_dir / f"{Path(ct_path).stem}_yellow{comp_id}.nii.gz"
-        nib.save(nib.Nifti1Image(cube, affine=ct_nii.affine), out_file)
-        print(f"Saved {out_file.name}")
+        # Crop CT
+        ct_cube = crop_to_cube(ct, indices, cube_size, pad_value=0)
+        ct_out_file = output_dir / f"{Path(ct_path).stem}_yellow{comp_id}.nii.gz"
+        nib.save(nib.Nifti1Image(ct_cube, affine=ct_nii.affine), ct_out_file)
+
+        # Crop segmentation (same indices, same cube size)
+        seg_cube = crop_to_cube(seg, indices, cube_size, pad_value=0)
+        seg_out_file = output_dir / f"{Path(seg_path).stem}_yellow{comp_id}_seg.nii.gz"
+        nib.save(nib.Nifti1Image(seg_cube, affine=seg_nii.affine), seg_out_file)
+
+        print(f"Saved CT: {ct_out_file.name}  Segmentation: {seg_out_file.name}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -71,4 +77,4 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, default=".", help="Where to save cubes")
     args = parser.parse_args()
 
-    crop_yellow_regions(args.ct_path, args.seg_path, args.cube_mm, args.output_dir)
+    crop_yellow_regions_with_seg(args.ct_path, args.seg_path, args.cube_mm, args.output_dir)

@@ -113,14 +113,21 @@ async def isac_model_predict(req: IsacModelPredictRequest):
     # Convert image to numpy array
     np_image = np.array(req.image, dtype=np.float32)
 
+    #TODO
+    #Preproccessing: We need to get a subvolume of x,y,z size around the boundng box. use that as input to hte model.
+
     # Run nnU-Net segmentation
     seg_result = run_nnunet_segmentation(
-        np_image,
-        req.bbox_coords,
+        np_image, #should be subvolume
+        req.bbox_coords, # Do we need to update the bbox coords to be relative to the subvolume? depends on model.
         req.dataset_id,
         req.config,
         req.fold
     )
+
+    #TODO
+    #Postprocessing: We need to place the seg_result back into a full volume of the original image size. Should be in the same format like how I did with the mocktest. FUll image binarymask I think.
+    #then return that as normal and everything should work as normal.
 
     if seg_result is None:
         return {"prediction": None, "status": "error"}
