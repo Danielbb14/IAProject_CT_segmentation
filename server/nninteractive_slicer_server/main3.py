@@ -27,6 +27,21 @@ class BBoxParams(BaseModel):
     positive_click: bool = True
 
 
+def unpack_binary_segmentation(binary_data, vol_shape):
+    """
+    Unpacks binary data (1 bit per voxel) into a full 3D numpy array (bool type).
+    """
+    total_voxels = np.prod(vol_shape)
+    unpacked_bits = np.unpackbits(np.frombuffer(binary_data, dtype=np.uint8))
+    unpacked_bits = unpacked_bits[:total_voxels]
+    segmentation_mask = (
+        unpacked_bits.reshape(vol_shape).astype(np.bool_).astype(np.uint8)
+    )
+
+    return segmentation_mask
+
+
+
 
 def call_isac_model_predict(
     image: np.ndarray,
@@ -192,7 +207,8 @@ async def add_bbox_interaction(params: BBoxParams):
     
     # Create new segmentation for this bounding box using nnU-Net
     # IMPORTANT: Replace these with your actual model details
-    DATASET_ID = "Dataset999_middleClick"
+    # DATASET_ID = "Dataset999_middleClick"
+    DATASET_ID = "Dataset002_axialBbox"
     CONFIG = "3d_fullres"
 
     bbox = [params.outer_point_one, params.outer_point_two]
@@ -265,41 +281,41 @@ async def clear_history():
     print("Cleared all segmentation history")
     return {"status": "ok", "message": "History cleared"}
 
-@app.post("/nnunet_predict")
-async def nnunet_predict():
-    """
-    Runs nnU-Net prediction on the currently loaded image using the latest bounding box.
-    This endpoint is now a wrapper around the reusable run_nnunet_segmentation function.
-    """
-    global current_image, segmentation_history
-    if current_image is None:
-        return {"status": "error", "message": "No image uploaded"}
+# @app.post("/nnunet_predict")
+# async def nnunet_predict():
+#     """
+#     Runs nnU-Net prediction on the currently loaded image using the latest bounding box.
+#     This endpoint is now a wrapper around the reusable run_nnunet_segmentation function.
+#     """
+#     global current_image, segmentation_history
+#     if current_image is None:
+#         return {"status": "error", "message": "No image uploaded"}
     
-    if not segmentation_history:
-        return {"status": "error", "message": "No bounding box interaction found in history"}
+#     if not segmentation_history:
+#         return {"status": "error", "message": "No bounding box interaction found in history"}
 
-    # Get the latest bounding box
-    latest_bbox = segmentation_history[-1]['bbox']
+#     # Get the latest bounding box
+#     latest_bbox = segmentation_history[-1]['bbox']
     
-    # IMPORTANT: Replace these with your actual model details
-    DATASET_ID = "Dataset001_Tumors"
-    CONFIG = "3d_fullres"
+#     # IMPORTANT: Replace these with your actual model details
+#     DATASET_ID = "Dataset001_Tumors"
+#     CONFIG = "3d_fullres"
 
-    # Run the segmentation
-    seg_array = run_nnunet_segmentation(current_image, latest_bbox, DATASET_ID, CONFIG)
+#     # Run the segmentation
+#     seg_array = run_nnunet_segmentation(current_image, latest_bbox, DATASET_ID, CONFIG)
 
-    if seg_array is None:
-        return {"status": "error", "message": "nnU-Net prediction failed."}
+#     if seg_array is None:
+#         return {"status": "error", "message": "nnU-Net prediction failed."}
 
-    # Pack and compress for response
-    compressed_result = pack_and_compress_segmentation(seg_array)
+#     # Pack and compress for response
+#     compressed_result = pack_and_compress_segmentation(seg_array)
     
-    print(f"Returning nnU-Net segmentation with {np.sum(seg_array)} voxels")
-    return Response(
-        content=compressed_result,
-        media_type="application/octet-stream",
-        headers={"Content-Encoding": "gzip"},
-    )
+#     print(f"Returning nnU-Net segmentation with {np.sum(seg_array)} voxels")
+#     return Response(
+#         content=compressed_result,
+#         media_type="application/octet-stream",
+#         headers={"Content-Encoding": "gzip"},
+#     )
 
 if __name__ == "__main__":
     import uvicorn

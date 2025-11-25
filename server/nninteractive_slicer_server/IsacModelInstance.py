@@ -34,12 +34,12 @@ def run_nnunet_segmentation(
     p1, p2 = np.array(bbox_coords[0]), np.array(bbox_coords[1])
 
     # Determine the bounding box slices (assuming z, y, x order)
-    z_min, y_min, x_min = np.min([p1, p2], axis=0)
-    z_max, y_max, x_max = np.max([p1, p2], axis=0)
+    x_min, z_min, y_min = np.min([p1, p2], axis=0)
+    x_max, z_max, y_max = np.max([p1, p2], axis=0)
 
     # Create the bounding box channel
     bbox_channel = np.zeros(image.shape, dtype=np.uint8)
-    bbox_channel[z_min:z_max+1, y_min:y_max+1, x_min:x_max+1] = 1
+    bbox_channel[x_min:x_max+1, z_min:z_max+1, y_min:y_max+1] = 1
 
     # Create temporary directories for nnU-Net input/output
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -59,9 +59,10 @@ def run_nnunet_segmentation(
             nib.save(nib.Nifti1Image(bbox_channel, affine), image_path_0001)
 
             # Set nnU-Net environment variables
-            os.environ["nnUNet_results"] = "/home/moriarty_d/projects/nnunet-oneclick/nnunet_results"
-            os.environ["nnUNet_preprocessed"] = "/home/moriarty_d/projects/nnunet-oneclick/nnunet_preprocessed"
-            os.environ["nnUNet_raw"] = "/home/moriarty_d/projects/nnunet-oneclick/nnunet_raw"
+            # Change these paths as needed for your model setup
+            os.environ["nnUNet_results"] = "/home/moriarty_d/projects/nnunet-bbox/nnunet_results"
+            # os.environ["nnUNet_preprocessed"] = "/home/moriarty_d/projects/nnunet-oneclick/nnunet_preprocessed"
+            # os.environ["nnUNet_raw"] = "/home/moriarty_d/projects/nnunet-oneclick/nnunet_raw"
 
             # 2. Construct nnU-Net command
             command = [
