@@ -9,3 +9,4 @@ nibabel
 nnunetv2
 uvicorn
 python-multipart
+scipy
