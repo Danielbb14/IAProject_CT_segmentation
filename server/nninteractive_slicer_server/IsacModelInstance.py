@@ -25,9 +25,9 @@ def extract_subvolume_from_bbox(
     """
     p1, p2 = np. array(bbox_coords[0]), np.array(bbox_coords[1])
     
-    # Get bbox extents (format: x, z, y)
-    x_min, z_min, y_min = np.min([p1, p2], axis=0)
-    x_max, z_max, y_max = np.max([p1, p2], axis=0)
+    # Get bbox extents (format: x, y, z - assuming input corresponds to Image dims 0, 1, 2)
+    x_min, y_min, z_min = np.min([p1, p2], axis=0)
+    x_max, y_max, z_max = np.max([p1, p2], axis=0)
     
     # Calculate center of bbox
     center_x = (x_min + x_max) // 2
@@ -76,22 +76,22 @@ def extract_subvolume_from_bbox(
     # Calculate bbox coordinates relative to the subvolume
     relative_x_min = x_min - x_start
     relative_x_max = x_max - x_start
-    relative_z_min = z_min - z_start
-    relative_z_max = z_max - z_start
     relative_y_min = y_min - y_start
     relative_y_max = y_max - y_start
+    relative_z_min = z_min - z_start
+    relative_z_max = z_max - z_start
     
     # Clamp to subvolume bounds
     relative_x_min = max(0, min(relative_x_min, size_x - 1))
     relative_x_max = max(0, min(relative_x_max, size_x - 1))
-    relative_z_min = max(0, min(relative_z_min, size_z - 1))
-    relative_z_max = max(0, min(relative_z_max, size_z - 1))
     relative_y_min = max(0, min(relative_y_min, size_y - 1))
     relative_y_max = max(0, min(relative_y_max, size_y - 1))
+    relative_z_min = max(0, min(relative_z_min, size_z - 1))
+    relative_z_max = max(0, min(relative_z_max, size_z - 1))
     
     relative_bbox = [
-        [relative_x_min, relative_z_min, relative_y_min],
-        [relative_x_max, relative_z_max, relative_y_max]
+        [relative_x_min, relative_y_min, relative_z_min],
+        [relative_x_max, relative_y_max, relative_z_max]
     ]
     
     print(f"[PREPROCESS] Original image shape: {image.shape}")
@@ -171,14 +171,14 @@ def run_nnunet_segmentation(
     p1, p2 = np. array(bbox_coords[0]), np.array(bbox_coords[1])
 
     # Determine the bounding box slices
-    x_min, z_min, y_min = np. min([p1, p2], axis=0)
-    x_max, z_max, y_max = np.max([p1, p2], axis=0)
+    x_min, y_min, z_min = np. min([p1, p2], axis=0)
+    x_max, y_max, z_max = np.max([p1, p2], axis=0)
 
     print(f"[NNUNET] Bbox bounds: x=[{x_min},{x_max}], y=[{y_min},{y_max}], z=[{z_min},{z_max}]")
 
     # Create the bounding box channel
     bbox_channel = np.zeros(image.shape, dtype=np.uint8)
-    bbox_channel[x_min:x_max+1, z_min:z_max+1, y_min:y_max+1] = 1
+    bbox_channel[x_min:x_max+1, y_min:y_max+1, z_min:z_max+1] = 1
 
     print(f"[NNUNET] Bbox channel sum: {bbox_channel.sum()} voxels")
 

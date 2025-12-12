@@ -14,6 +14,11 @@ import requests
 import numpy as np
 from typing import List, Union
 
+try:
+    import config
+except ImportError:
+    from . import config
+
 app = FastAPI()
 
 # Global storage
@@ -22,8 +27,13 @@ segmentation_history: List[Dict] = []  # Store all segmentations separately
 next_segment_id = 1
 
 class BBoxParams(BaseModel):
-    outer_point_one: list[int]  # [x, y, z] - already reversed by plugin
-    outer_point_two: list[int]  # [x, y, z] - already reversed by plugin
+    outer_point_one: list[int]  # [x, y, z] 
+    outer_point_two: list[int]  # [x, y, z] 
+    positive_click: bool = True
+
+
+class PointParams(BaseModel):
+    point: list[int]  # [x, y, z]
     positive_click: bool = True
 
 
@@ -43,13 +53,13 @@ def unpack_binary_segmentation(binary_data, vol_shape):
 
 
 
-def call_isac_model_predict(
+def bbox_predict(
     image: np.ndarray,
     bbox_coords: List[List[int]],
     dataset_id: str,
-    config: str,
+    config_name: str,
     fold: str,
-    server_url: str = "http://127.0.0.1:8000/IsacModelPredict"
+    server_url: str = None
 ) -> Union[np.ndarray, None]:
     """
     Calls the IsacModelPredict FastAPI endpoint and returns the segmentation result.
@@ -58,19 +68,70 @@ def call_isac_model_predict(
         image: The input image as a NumPy array.
         bbox_coords: Bounding box coordinates [[p1], [p2]].
         dataset_id: nnU-Net dataset ID (e.g., "Dataset123_TaskName").
-        config: nnU-Net configuration (e.g., "3d_fullres").
+        config_name: nnU-Net configuration (e.g., "3d_fullres").
         fold: Model fold to use (e.g., "0").
         server_url: URL of the FastAPI endpoint.
 
     Returns:
         Segmentation mask as a NumPy array, or None if the request fails.
     """
+    if server_url is None:
+        server_url = config.ISAC_SERVER_URL
 
     payload = {
         "image": image.tolist(),
         "bbox_coords": bbox_coords,
         "dataset_id": dataset_id,
-        "config": config,
+        "config": config_name,
+        "fold": fold
+    }
+
+    try:
+        response = requests.post(server_url, json=payload, timeout=300)
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get("status") == "success" and data.get("prediction") is not None:
+            return np.array(data["prediction"], dtype=np.uint8)
+        else:
+            print("Server returned an error:", data)
+            return None
+
+    except requests.RequestException as e:
+        print(f"Request failed: {e}")
+    return None
+
+
+def point_predict(
+    image: np.ndarray,
+    point_coords: List[int],
+    dataset_id: str,
+    config_name: str,
+    fold: str,
+    server_url: str = None
+) -> Union[np.ndarray, None]:
+    """
+    Calls the IsacModelPointPredict FastAPI endpoint and returns the segmentation result.
+
+    Args:
+        image: The input image as a NumPy array.
+        point_coords: Point coordinates [x, y, z].
+        dataset_id: nnU-Net dataset ID.
+        config_name: nnU-Net configuration.
+        fold: Model fold.
+        server_url: URL of the FastAPI endpoint.
+
+    Returns:
+        Segmentation mask as a NumPy array, or None if the request fails.
+    """
+    if server_url is None:
+        server_url = config.ISAC_POINT_SERVER_URL
+
+    payload = {
+        "image": image.tolist(),
+        "point_coords": point_coords,
+        "dataset_id": dataset_id,
+        "config": config_name,
         "fold": fold
     }
 
@@ -205,16 +266,14 @@ async def add_bbox_interaction(params: BBoxParams):
     print(f"Received bbox (reversed): {params.outer_point_one} to {params.outer_point_two}")
     print(f"Positive click: {params.positive_click}")
     
-    # Create new segmentation for this bounding box using nnU-Net
-    # IMPORTANT: Replace these with your actual model details
-    # DATASET_ID = "Dataset999_middleClick"
-    DATASET_ID = "Dataset002_axialBbox"
-    CONFIG = "3d_fullres"
+    # Load model details from config
+    DATASET_ID = config.DATASET_ID
+    CONFIG = config.CONFIG
+    FOLD = config.FOLD
 
     bbox = [params.outer_point_one, params.outer_point_two]
     
-    # replace this line when you change models
-    new_seg = call_isac_model_predict(current_image, bbox, DATASET_ID, CONFIG, fold="0")
+    new_seg = bbox_predict(current_image, bbox, DATASET_ID, CONFIG, fold=FOLD)
 
     if new_seg is None:
         return {"status": "error", "message": "nnU-Net prediction failed."}
