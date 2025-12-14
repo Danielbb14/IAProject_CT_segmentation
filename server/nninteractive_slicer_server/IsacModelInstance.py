@@ -252,6 +252,108 @@ def run_nnunet_segmentation(
             traceback.print_exc()
             return None
 
+def run_point_segmentation(
+    image: np.ndarray,
+    point_coords: List[List[int]],
+    dataset_id: str,
+    config: str,
+    fold: str
+) -> Union[np. ndarray, None]:
+    """
+    Runs nnU-Net prediction on a given image and point coordinates.
+    """
+
+    print(f"[NNUNET] Image shape: {image. shape}")
+    print(f"[NNUNET] Point coords: {point_coords}")
+
+    # Create the point channel
+    point_channel = np.zeros(image.shape, dtype=np.uint8)
+    
+    for p in point_coords:
+        # Ensure point is within bounds
+        if (0 <= p[0] < image.shape[0] and 
+            0 <= p[1] < image.shape[1] and 
+            0 <= p[2] < image.shape[2]):
+            point_channel[p[0], p[1], p[2]] = 1
+            print(f"[NNUNET] Added point at {p}")
+        else:
+            print(f"[NNUNET WARNING] Point {p} is out of bounds for image shape {image.shape}")
+
+    print(f"[NNUNET] Point channel sum: {point_channel.sum()} voxels")
+
+    # Create temporary directories for nnU-Net input/output
+    with tempfile.TemporaryDirectory() as temp_dir:
+        input_dir = os.path.join(temp_dir, "input")
+        output_dir = os. path.join(temp_dir, "output")
+        os.makedirs(input_dir)
+        os.makedirs(output_dir)
+
+        try:
+            # 1. Save the current image and bbox channel as NIfTI files
+            image_path_0000 = os.path. join(input_dir, "image_0000.nii.gz")
+            image_path_0001 = os.path.join(input_dir, "image_0001.nii.gz")
+
+            affine = np.eye(4)
+
+            nib.save(nib.Nifti1Image(image, affine), image_path_0000)
+            nib.save(nib. Nifti1Image(point_channel, affine), image_path_0001)
+
+            # Set nnU-Net environment variables
+            os.environ["nnUNet_results"] = "/home/moriarty_d/projects/nnunet-bbox/nnunet_results"
+
+            # 2.  Construct nnU-Net command
+            command = [
+                "nnUNetv2_predict",
+                "-i", input_dir,
+                "-o", output_dir,
+                "-d", dataset_id,
+                "-c", config,
+                "-f", fold,
+                "--disable_tta"
+            ]
+
+            print(f"[NNUNET] Running command: {' '.join(command)}")
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+
+            print("[NNUNET] nnU-Net completed successfully")
+
+            # 3. Load output segmentation - TRY MULTIPLE POSSIBLE FILENAMES
+            # nnU-Net might name it "image.nii.gz" directly
+            possible_output_paths = [
+                os.path. join(output_dir, "image.nii.gz"),  # Direct output
+                os.path.join(output_dir, "image_0000.nii.gz"),  # Sometimes keeps input name
+            ]
+            
+            output_path = None
+            for path in possible_output_paths:
+                if os.path.exists(path):
+                    output_path = path
+                    print(f"[NNUNET] Found output at: {output_path}")
+                    break
+            
+            if output_path is None:
+                print(f"[NNUNET ERROR] No output found. Available files: {os.listdir(output_dir)}")
+                raise FileNotFoundError("nnU-Net did not produce an output file.")
+
+            seg_img = nib.load(output_path)
+            seg_array = seg_img.get_fdata().astype(np.uint8)
+            
+            print(f"[NNUNET] Segmentation shape: {seg_array. shape}, sum: {seg_array.sum()}")
+            
+            return seg_array
+
+        except subprocess.CalledProcessError as e:
+            print(f"[NNUNET ERROR] Command failed (exit {e.returncode}): {e.stderr}")
+            return None
+        except Exception as e:
+            print(f"[NNUNET ERROR] Unexpected error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+
+
+
 
 # -------------------------------
 # FastAPI endpoint
@@ -312,3 +414,48 @@ async def isac_model_predict(req: IsacModelPredictRequest):
     
     # Convert result back to list for JSON serialization
     return {"prediction": full_volume_prediction. tolist(), "status":"success"}
+
+
+class IsacModelPointPredictRequest(BaseModel):
+    image: List[List[List[float]]]
+    point_coords: List[List[int]]
+    dataset_id: str
+    config: str
+    fold: str
+
+
+@app.post("/IsacModelPredictPoint")
+async def isac_model_predict_point(req: IsacModelPointPredictRequest):
+    print("\n" + "="*80)
+    print("[ENDPOINT] IsacModelPredictPoint called")
+    print("="*80)
+    
+    # Convert image to numpy array
+    np_image = np.array(req.image, dtype=np.float32)
+    
+    print(f"[ENDPOINT] Image shape: {np_image.shape}")
+    print(f"[ENDPOINT] Points: {req.point_coords}")
+    
+    # Run nnU-Net segmentation directly on image with points (NO CROP)
+    seg_result = run_point_segmentation(
+        np_image,
+        req.point_coords,
+        req.dataset_id,
+        req.config,
+        req.fold
+    )
+
+    if seg_result is None:
+        print("[ENDPOINT] Segmentation failed!")
+        return {"prediction": None, "status": "error"}
+    
+    print(f"[ENDPOINT] Success! Returning {np.sum(seg_result)} voxels")
+    print("="*80 + "\n")
+    
+    # Convert result back to list for JSON serialization
+    return {"prediction": seg_result.tolist(), "status":"success"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

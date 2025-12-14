@@ -23,9 +23,9 @@ CONFIG = os.getenv("NNUNET_CONFIG", "3d_fullres")
 FOLD = os.getenv("NNUNET_FOLD", "0")
 
 # Point Model Configuration
-POINT_DATASET_ID = os.getenv("NNUNET_POINT_DATASET_ID", "Dataset999_MiddleClick") # Example default
+POINT_DATASET_ID = os.getenv("NNUNET_POINT_DATASET_ID", "Dataset999_middleClick") # Example default
 POINT_CONFIG = os.getenv("NNUNET_POINT_CONFIG", "3d_fullres")
 
 # Server Configuration
 ISAC_SERVER_URL = os.getenv("ISAC_SERVER_URL", "http://127.0.0.1:8000/IsacModelPredict")
-ISAC_POINT_SERVER_URL = os.getenv("ISAC_POINT_SERVER_URL", "http://127.0.0.1:8000/IsacModelPointPredict")
+ISAC_POINT_SERVER_URL = os.getenv("ISAC_POINT_SERVER_URL", "http://127.0.0.1:8000/IsacModelPredictPoint")

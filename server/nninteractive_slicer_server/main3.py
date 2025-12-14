@@ -12,7 +12,7 @@ import nibabel as nib
 
 import requests
 import numpy as np
-from typing import List, Union
+from typing import List, Union, Optional
 
 try:
     import config
@@ -33,7 +33,8 @@ class BBoxParams(BaseModel):
 
 
 class PointParams(BaseModel):
-    point: list[int]  # [x, y, z]
+    point: Optional[list[int]] = None # [z, y, x] - reversed by plugin from [x, y, z]
+    voxel_coord: Optional[list[int]] = None # Alias for backward compatibility
     positive_click: bool = True
 
 
@@ -104,7 +105,7 @@ def bbox_predict(
 
 def point_predict(
     image: np.ndarray,
-    point_coords: List[int],
+    point_coords: List[List[int]],
     dataset_id: str,
     config_name: str,
     fold: str,
@@ -304,6 +305,66 @@ async def add_bbox_interaction(params: BBoxParams):
         media_type="application/octet-stream",
         headers={"Content-Encoding": "gzip"},
     )
+
+
+@app.post("/add_point_interaction")
+async def add_point_interaction(params: PointParams):
+    """
+    Add a new point segmentation to our collection
+    """
+    global current_image, segmentation_history, next_segment_id
+    
+    # Check if image is uploaded
+    if current_image is None:
+        return {"status": "error", "message": "No image uploaded"}
+    
+    # Handle backward compatibility for point coordinates
+    actual_point = params.point if params.point is not None else params.voxel_coord
+    if actual_point is None:
+        return {"status": "error", "message": "No point coordinates provided (expected 'point' or 'voxel_coord')"}
+    
+    print(f"Received point (reversed): {actual_point}")
+    print(f"Positive click: {params.positive_click}")
+    
+    # Load model details from config
+    DATASET_ID = config.POINT_DATASET_ID
+    CONFIG = config.POINT_CONFIG
+    FOLD = config.FOLD
+
+    new_seg = point_predict(current_image, [actual_point], DATASET_ID, CONFIG, fold=FOLD)
+
+    if new_seg is None:
+        return {"status": "error", "message": "nnU-Net prediction failed."}
+    
+    # Store this segmentation in our history
+    segmentation_history.append({
+        'id': next_segment_id,
+        'mask': new_seg,
+        'positive': params.positive_click,
+        'point': actual_point,
+        'voxel_count': int(np.sum(new_seg))
+    })
+    
+    print(f"Added segment {next_segment_id} ({'positive' if params.positive_click else 'negative'}) with {np.sum(new_seg)} voxels")
+    next_segment_id += 1
+    
+    # Combine all segmentations
+    combined_seg = combine_all_segmentations(current_image.shape)
+    
+    # Pack and compress the result
+    compressed_result = pack_and_compress_segmentation(combined_seg)
+    
+    print(f"Returning combined segmentation with {np.sum(combined_seg)} total voxels")
+    print(f"Total segments in history: {len(segmentation_history)}")
+    
+    return Response(
+        content=compressed_result,
+        media_type="application/octet-stream",
+        headers={"Content-Encoding": "gzip"},
+    )
+
+
+
 
 @app.get("/status")
 async def get_status():
