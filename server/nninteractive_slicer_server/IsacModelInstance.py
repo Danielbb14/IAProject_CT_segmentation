@@ -6,6 +6,10 @@ import numpy as np
 import nibabel as nib
 from fastapi import FastAPI
 from pydantic import BaseModel
+try:
+    from .config import config
+except ImportError:
+    from config import config
 
 
 app = FastAPI(title="ISAC nnU-Net Segmentation Server")
@@ -158,7 +162,7 @@ def run_nnunet_segmentation(
     image: np.ndarray,
     bbox_coords: List[List[int]],
     dataset_id: str,
-    config: str,
+    nnunet_configuration: str,
     fold: str
 ) -> Union[np. ndarray, None]:
     """
@@ -200,7 +204,20 @@ def run_nnunet_segmentation(
             nib.save(nib. Nifti1Image(bbox_channel, affine), image_path_0001)
 
             # Set nnU-Net environment variables
-            os.environ["nnUNet_results"] = "/home/moriarty_d/projects/nnunet-bbox/nnunet_results"
+            # 1. Get path from config (defaulting to relative "./nnunet_results")
+            config_path = config.get("nnunet_paths", {}).get("results_folder", "./nnunet_results")
+            
+            # 2. If it's a relative path, resolve it relative to the 'server' folder
+            #    (We assume this script is in server/nninteractive_slicer_server/)
+            if not os.path.isabs(config_path):
+                # Go up one level from this script's directory to get to 'server/'
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                results_folder = os.path.join(base_dir, config_path)
+            else:
+                results_folder = config_path
+
+            os.environ["nnUNet_results"] = os.path.abspath(results_folder)
+            print(f"[NNUNET] Using results folder: {os.environ['nnUNet_results']}")
 
             # 2.  Construct nnU-Net command
             command = [
@@ -208,7 +225,7 @@ def run_nnunet_segmentation(
                 "-i", input_dir,
                 "-o", output_dir,
                 "-d", dataset_id,
-                "-c", config,
+                "-c", nnunet_configuration,
                 "-f", fold,
                 "--disable_tta"
             ]

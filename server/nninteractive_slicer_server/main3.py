@@ -14,6 +14,11 @@ import requests
 import numpy as np
 from typing import List, Union
 
+try:
+    from .config import config
+except ImportError:
+    from config import config
+
 app = FastAPI()
 
 # Global storage
@@ -47,9 +52,9 @@ def call_isac_model_predict(
     image: np.ndarray,
     bbox_coords: List[List[int]],
     dataset_id: str,
-    config: str,
+    nnunet_config: str,
     fold: str,
-    server_url: str = "http://127.0.0.1:8000/IsacModelPredict"
+    server_url: str = None
 ) -> Union[np.ndarray, None]:
     """
     Calls the IsacModelPredict FastAPI endpoint and returns the segmentation result.
@@ -58,19 +63,26 @@ def call_isac_model_predict(
         image: The input image as a NumPy array.
         bbox_coords: Bounding box coordinates [[p1], [p2]].
         dataset_id: nnU-Net dataset ID (e.g., "Dataset123_TaskName").
-        config: nnU-Net configuration (e.g., "3d_fullres").
+        nnunet_config: nnU-Net configuration (e.g., "3d_fullres").
         fold: Model fold to use (e.g., "0").
         server_url: URL of the FastAPI endpoint.
 
     Returns:
         Segmentation mask as a NumPy array, or None if the request fails.
     """
+    if server_url is None:
+        # Load server URL from config, assuming config is valid
+        inference_conf = config.get("inference_server")
+        if not inference_conf or "url" not in inference_conf:
+             print("Error: 'inference_server.url' not found in config")
+             return None
+        server_url = inference_conf["url"]
 
     payload = {
         "image": image.tolist(),
         "bbox_coords": bbox_coords,
         "dataset_id": dataset_id,
-        "config": config,
+        "config": nnunet_config,
         "fold": fold
     }
 
@@ -206,15 +218,21 @@ async def add_bbox_interaction(params: BBoxParams):
     print(f"Positive click: {params.positive_click}")
     
     # Create new segmentation for this bounding box using nnU-Net
-    # IMPORTANT: Replace these with your actual model details
-    # DATASET_ID = "Dataset999_middleClick"
-    DATASET_ID = "Dataset002_axialBbox"
-    CONFIG = "3d_fullres"
+    model_defaults = config.get("model_defaults")
+    if not model_defaults:
+         return {"status": "error", "message": "Configuration error: 'model_defaults' missing in config.json"}
+
+    DATASET_ID = model_defaults.get("dataset_id")
+    CONFIG = model_defaults.get("config")
+    FOLD = model_defaults.get("fold")
+    
+    if not DATASET_ID or not CONFIG:
+         return {"status": "error", "message": "Configuration error: 'dataset_id' or 'config' missing in model_defaults"}
 
     bbox = [params.outer_point_one, params.outer_point_two]
     
     # replace this line when you change models
-    new_seg = call_isac_model_predict(current_image, bbox, DATASET_ID, CONFIG, fold="0")
+    new_seg = call_isac_model_predict(current_image, bbox, DATASET_ID, CONFIG, fold=FOLD)
 
     if new_seg is None:
         return {"status": "error", "message": "nnU-Net prediction failed."}
@@ -319,4 +337,14 @@ async def clear_history():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=1527)
+    slicer_conf = config.get("slicer_server")
+    if not slicer_conf:
+        # Fallback only if config is completely broken, but try to use config values
+        print("Warning: 'slicer_server' config missing, using hardcoded defaults as failsafe.")
+        host = "0.0.0.0"
+        port = 1527
+    else:
+        host = slicer_conf.get("host")
+        port = slicer_conf.get("port")
+
+    uvicorn.run(app, host=host, port=port)
