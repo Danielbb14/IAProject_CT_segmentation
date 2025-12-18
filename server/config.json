@@ -1,0 +1,19 @@
+{
+  "nnunet_paths": {
+    "results_folder": "./nnunet_results"
+  },
+  "inference_server": {
+    "url": "http://127.0.0.1:8000/IsacModelPredict",
+    "host": "0.0.0.0",
+    "port": 8000
+  },
+  "slicer_server": {
+    "host": "0.0.0.0",
+    "port": 1527
+  },
+  "model_defaults": {
+    "dataset_id": "Dataset002_axialBbox",
+    "config": "3d_fullres",
+    "fold": "0"
+  }
+}
